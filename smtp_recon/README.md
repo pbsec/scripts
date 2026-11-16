@@ -2,40 +2,39 @@
 
 ## About
 
-Skrypt do analizy bezpieczeństwa oraz mapowania infrastruktury w oparciu o nagłówki wiadomości SMTP. 
-Use case: Realizowanie projektu (np. aplikacja www) gdzie przychodzi mail na skrzynkę, surowe nagłówki wrzucane są do programu który analizuję bezpieczeństwo konfiguracji oraz mapuje wykorzystywaną infrastrukturę.
+A script for security analysis and infrastructure mapping based on SMTP message headers.
+Use case: Implementing a project (e.g., a web application) where an incoming email is received in a mailbox, and the raw headers are fed into a program that analyzes the configuration's security and maps the infrastructure being used.
 
 
 ## Features
 
-  - Mapowanie infrastruktury (Received: chain -> IP, hostnames, hops, IPs)
-  - Fingerprinting oprogramowania (MTA, mailery, AV, klienty pocztowe + wersje, itp.)
-  - Bezpieczeństwo SPF / DKIM / DMARC / ARC / TLS / itp.
-  - Inne "ciekawe" nagłówki (X-Originating-IP, mismatch From/Reply-To/Return-Path,
-    X-Spam-*, wewnętrzne IP w nagłówkach, custom X- headers, itp.)
+- Infrastructure mapping (Received: chain -> IP, hostnames, hops, IPs)
+- Software fingerprinting (MTA, mailers, AV, email clients + versions, etc.)
+- Security: SPF / DKIM / DMARC / ARC / TLS / etc.
+- Other "interesting" headers (X-Originating-IP, mismatches between From/Reply-To/Return-Path,
+X-Spam-*, internal IPs in headers, custom X- headers, etc.)
 
 ## Usage
 
 ```
 $ python3 smtp_recon.py --help
-usage: smtp_recon.py [-h] --headers HEADERS [--json JSON] [--dns] [--deep] [--no-color]
+usage: smtp_header_analyzer.py [-h] --headers HEADERS [--json JSON] [--dns] [--deep] [--no-color]
 
-Analiza bezpieczeństwa nagłówków SMTP (pentest / recon).
+SMTP header security analysis (pentest / recon).
 
 optional arguments:
   -h, --help         show this help message and exit
-  --headers HEADERS  Plik z nagłówkami/wiadomością (.txt/.eml)
-  --json JSON        Zapisz raport również do pliku JSON
-  --dns              Wykonaj zapytania DNS (SPF/DMARC/MX/BIMI/MTA-STS/TLS-RPT, ASN, siła klucza DKIM) dla domeny nadawcy (wymaga dnspython i dostępu do sieci)
-  --deep             Rozszerza --dns o pełną weryfikację konfiguracji: rekurencyjne rozwinięcie SPF (include/redirect + limit 10 lookupów), spójność PTR<->A dla każdego
-                     publicznego hopa, grupowanie ASN, DNSSEC oraz podsumowanie postawy bezpieczeństwa domeny i hipotezy rekonesansu. Implikuje --dns. Więcej zapytań DNS =
-                     wolniejsze wykonanie.
-  --no-color         Wyłącz kolorowanie output
+  --headers HEADERS  File with headers/message (.txt/.eml)
+  --json JSON        Also save the report to a JSON file
+  --dns              Run live DNS queries (SPF/DMARC/MX/BIMI/MTA-STS/TLS-RPT, ASN, DKIM key strength) for the sender domain (requires dnspython and network access)
+  --deep             Extends --dns with a full configuration check: recursive SPF expansion (include/redirect + 10-lookup limit), PTR<->A consistency for every public hop, ASN grouping, DNSSEC, plus a
+                     domain security posture summary and recon hypotheses. Implies --dns. More DNS queries = slower execution.
+  --no-color         Disable colored output
 ```
 
-Flaga `--headers` jako mus, jedynie pasywna analiza.
-Flaga `--dns` jako dodatkowe active checks.
-Flaga `--deep` jako kompletna analiza, inkluduje `--dns`.
+The `--headers` flag is mandatory; it performs only passive analysis.
+The `--dns` flag enables additional active checks.
+The `--deep` flag triggers a comprehensive analysis, which includes `--dns`.
 
 ## Examples
 
