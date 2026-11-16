@@ -2,17 +2,21 @@
 """
 SMTP Header Security Analyzer
 ==============================
-Narzędzie do analizy bezpieczeństwa nagłówków wiadomości e-mail (SMTP)
-pod kątem pentestów / reconu infrastruktury.
+Tool for analyzing the security of e-mail (SMTP) message headers
+for pentesting / infrastructure recon.
 
-Analizuje:
-  - Mapowanie infrastruktury (Received: chain -> IP, hostnames, hops, IPs)
-  - Fingerprinting oprogramowania (MTA, mailery, AV, klienty pocztowe + wersje, itp.)
-  - Bezpieczeństwo SPF / DKIM / DMARC / ARC / TLS / itp.
-  - Inne "ciekawe" nagłówki (X-Originating-IP, mismatch From/Reply-To/Return-Path,
-    X-Spam-*, wewnętrzne IP w nagłówkach, custom X- headers, itp.)
+Analyzes:
+  - Infrastructure mapping (Received: chain -> IP, hostnames, hops)
+  - Software fingerprinting (MTA, mailers, mail clients + versions)
+  - SPF / DKIM / DMARC / ARC security
+  - Other "interesting" headers (X-Originating-IP, mismatch From/Reply-To/Return-Path,
+    X-Spam-*, internal IPs in headers, custom X- headers, etc.)
 
-Użycie:
+Author: for personal use / within authorized penetration tests.
+Use only on messages you have the right to access / within the agreed
+scope of a security test.
+
+Usage:
     python3 smtp_header_analyzer.py --headers msg.txt
     python3 smtp_header_analyzer.py --headers msg.eml --json report.json
     python3 smtp_header_analyzer.py --headers msg.txt --dns --no-color
@@ -132,7 +136,7 @@ ENV_INDICATOR_RE = re.compile(r'(?:^|[.\-_])(dev|test|staging|stage|uat|preprod|
 
 # DKIM selectors that reveal the underlying ESP/environment by naming convention.
 KNOWN_SELECTOR_PATTERNS = [
-    ("Microsoft 365 (domyślna konwencja)", re.compile(r'^selector[12]$', re.I)),
+    ("Microsoft 365 (default convention)", re.compile(r'^selector[12]$', re.I)),
     ("Google Workspace", re.compile(r'^google$', re.I)),
     ("Amazon SES", re.compile(r'^[a-z0-9]+\.ses$|^ses$', re.I)),
     ("Mailchimp/Mandrill", re.compile(r'^k[1-3]$|^mandrill$', re.I)),
@@ -185,19 +189,19 @@ def _v(tuple_str):
 VULN_HINTS = {
     "PHPMailer": [
         (lambda v: v and v < (5, 2, 27), "HIGH",
-         "Wersje PHPMailer < 5.2.27 podatne na znane CVE związane z RCE "
-         "(m.in. CVE-2016-10033, CVE-2017-5223) - zweryfikuj w NVD."),
+         "PHPMailer versions < 5.2.27 are vulnerable to known RCE-related CVEs "
+         "(incl. CVE-2016-10033, CVE-2017-5223) - verify in NVD."),
         (lambda v: v and (5, 2, 27) <= v < (6, 0, 6), "MEDIUM",
-         "Starsza gałąź PHPMailer 5.x/6.x - sprawdź dedykowane CVE dla tej wersji."),
+         "Older PHPMailer 5.x/6.x branch - check for dedicated CVEs for this version."),
     ],
     "Exim": [
         (lambda v: v and v < (4, 94, 2), "CRITICAL",
-         "Exim < 4.94.2 - historycznie wiele krytycznych CVE (m.in. '21Nails', "
-         "CVE-2020-8218/8219/etc.) - zweryfikuj w NVD."),
+         "Exim < 4.94.2 - historically many critical CVEs (incl. '21Nails', "
+         "CVE-2020-8218/8219/etc.) - verify in NVD."),
     ],
     "Sendmail": [
         (lambda v: v and v < (8, 15, 2), "MEDIUM",
-         "Starsza wersja Sendmail - sprawdź znane CVE dla tej gałęzi."),
+         "Older Sendmail version - check known CVEs for this branch."),
     ],
 }
 
@@ -208,7 +212,7 @@ DKIM_TAG_RE = re.compile(r'([a-z]+)\s*=\s*([^;]+);?', re.I)
 DMARC_RESULT_RE = re.compile(r'dmarc\s*=\s*(\w+)\s*(?:\(([^)]*)\))?', re.I)
 SPF_RESULT_RE = re.compile(r'spf\s*=\s*(\w+)\s*(?:\(([^)]*)\))?', re.I)
 
-PRIVATE_NOTE = " [adres prywatny/wewnętrzny wg RFC1918/RFC4193 - możliwe ujawnienie topologii sieci wewnętrznej]"
+PRIVATE_NOTE = " [private/internal address per RFC1918/RFC4193 - possible disclosure of internal network topology]"
 
 INTERESTING_HEADER_NAMES = [
     "X-Originating-IP", "X-Sender-IP", "X-Client-IP", "X-Real-IP",
@@ -499,21 +503,21 @@ def analyze_infrastructure(msg, report):
                 sev = "INFO" if is_loopback_hop else "LOW"
                 report.add(
                     "Infrastructure", sev,
-                    f"Ujawniony prywatny/wewnętrzny adres IP (RFC1918/loopback/link-local) w Received #{idx}: {ip}",
-                    ("Loopback - typowy dla lokalnego przekazania do skanera antywirusowego/"
-                     "antyspamowego na tej samej maszynie (nie jest to wyciek topologii sieci)."
+                    f"Internal/private IP address disclosed (RFC1918/loopback/link-local) in Received #{idx}: {ip}",
+                    ("Loopback - typical for a local hand-off to an antivirus/"
+                     "antispam scanner on the same machine (not a network topology leak)."
                      if is_loopback_hop else
-                     "Może ujawniać topologie sieci wewnętrznej nadawcy (segmentacja, "
-                     "hosty relay/serwery pocztowe za NAT).")
+                     "May reveal the sender's internal network topology (segmentation, "
+                     "relay/mail servers behind NAT).")
                 )
 
         for scanner in scanners:
             port_str = f", port {scanner['port']}" if scanner["port"] else ""
             report.add(
                 "Infrastructure", "INFO",
-                f"Hop #{idx}: wykryto skaner treści '{scanner['name']}'{port_str}",
-                f"Nagłówek: {scanner['raw']}. Ujawnia stos zabezpieczeń antywirusowych/"
-                f"antyspamowych po stronie serwera pocztowego."
+                f"Hop #{idx}: content scanner '{scanner['name']}' detected{port_str}",
+                f"Header: {scanner['raw']}. Reveals the mail server's antivirus/"
+                f"antispam stack."
             )
 
     report.infra_hops = hops
@@ -521,14 +525,14 @@ def analyze_infrastructure(msg, report):
     report.hostnames = list(hostnames_found.values())
 
     for name, host in providers_found.items():
-        report.add("Infrastructure", "INFO", f"Wykryty dostawca poczty: {name}",
-                    f"Zidentyfikowano na podstawie hosta '{host}' w łańcuchu Received "
-                    f"(lub w Authentication-Results).")
+        report.add("Infrastructure", "INFO", f"Mail provider detected: {name}",
+                    f"Identified based on host '{host}' in the Received chain "
+                    f"(or in Authentication-Results).")
 
     if not hops:
-        report.add("Infrastructure", "INFO", "Brak nagłówków Received",
-                    "Nie można zbudować ścieżki hopów SMTP - nagłówki mogły zostać "
-                    "usunięte/zanonimizowane lub wiadomość zawiera tylko częściowe nagłówki.")
+        report.add("Infrastructure", "INFO", "No Received headers",
+                    "Cannot build the SMTP hop path - headers may have been "
+                    "removed/anonymized, or the message contains only partial headers.")
     else:
         # Origin/ingress hop = the OLDEST hop (closest to the true sender)
         # that carries at least one PUBLIC IP - i.e. the point where the
@@ -547,16 +551,16 @@ def analyze_infrastructure(msg, report):
             origin_public_ips = [ip for ip in origin["ips"] if not is_private_ip(ip)]
             report.add(
                 "Infrastructure", "INFO",
-                f"Prawdopodobny publiczny adres IP źródła wiadomości: {', '.join(origin_public_ips)}",
-                f"Pochodzi z nagłówka Received #{origin['index']}: from={origin.get('from_host')}"
+                f"Likely public IP address of the message source: {', '.join(origin_public_ips)}",
+                f"Taken from Received header #{origin['index']}: from={origin.get('from_host')}"
             )
         else:
             report.add(
                 "Infrastructure", "INFO",
-                "Brak publicznego adresu IP w łańcuchu Received",
-                "Żaden z hopów nie zawiera jednoznacznie publicznego adresu IP - może to "
-                "oznaczać w pełni wewnętrzną wysyłkę (test/relay w sieci lokalnej) lub "
-                "usunięcie/zanonimizowanie tej informacji przed przekazaniem pliku do analizy."
+                "No public IP address in the Received chain",
+                "None of the hops clearly contains a public IP address - this may "
+                "indicate fully internal sending (test/relay on a local network) or "
+                "removal/anonymization of this information before the file was submitted for analysis."
             )
 
     # X-Originating-IP / X-Sender-IP etc. also help pinpoint client machine
@@ -568,10 +572,10 @@ def analyze_infrastructure(msg, report):
                 sev = "MEDIUM" if not is_private_ip(ip) else "LOW"
                 report.add(
                     "Infrastructure", sev,
-                    f"{hname} ujawnia adres IP klienta: {ip}",
-                    "Bezpośrednie ujawnienie IP urządzenia nadawcy - przydatne w OSINT/"
-                    "geolokalizacji, może pomijać ochronę anonimowości (np. VPN nadawcy "
-                    "jeśli klient pocztowy dopisuje realny IP)."
+                    f"{hname} discloses the client IP address: {ip}",
+                    "Direct disclosure of the sender device's IP - useful for OSINT/"
+                    "geolocation, may bypass anonymity protection (e.g. the sender's VPN "
+                    "if the mail client adds the real IP)."
                 )
 
     return hops
@@ -626,7 +630,7 @@ def analyze_software(msg, report):
             continue
         seen.add(key)
         found.append({
-            "software": f"{name_guess} (niezidentyfikowane)",
+            "software": f"{name_guess} (unidentified)",
             "version": version,
             "header": hname,
             "raw": val[:200],
@@ -637,8 +641,8 @@ def analyze_software(msg, report):
     for item in found:
         sw = item["software"]
         ver = item["version"]
-        detail = f"Wykryto w nagłówku '{item['header']}': {item['raw']}"
-        report.add("Software", "INFO", f"Zidentyfikowano: {sw}" + (f" v{ver}" if ver else ""), detail)
+        detail = f"Detected in header '{item['header']}': {item['raw']}"
+        report.add("Software", "INFO", f"Identified: {sw}" + (f" v{ver}" if ver else ""), detail)
 
         if ver and sw in VULN_HINTS:
             v_tuple = _v(ver)
@@ -646,15 +650,15 @@ def analyze_software(msg, report):
                 try:
                     if check_fn(v_tuple):
                         report.add("Software", sev,
-                                    f"{sw} {ver} - potencjalnie przestarzała/podatna wersja",
+                                    f"{sw} {ver} - potentially outdated/vulnerable version",
                                     msg_text)
                 except Exception:
                     pass
 
     if not found:
-        report.add("Software", "INFO", "Nie wykryto jednoznacznych sygnatur oprogramowania",
-                    "Serwer/klient może celowo ukrywać banner (dobra praktyka) lub "
-                    "użyto nietypowego oprogramowania spoza bazy sygnatur.")
+        report.add("Software", "INFO", "No unambiguous software signatures detected",
+                    "The server/client may deliberately hide its banner (good practice) or "
+                    "uses unusual software outside the signature database.")
 
 
 def classify_tls_version(version_str):
@@ -662,16 +666,16 @@ def classify_tls_version(version_str):
     Received headers (formats vary: 'TLS1_3', 'TLSv1.3', 'SSLv3', ...)."""
     v = version_str.lower()
     if "ssl" in v:
-        return "CRITICAL", "Protokół SSL jest przestarzały i uznawany za niebezpieczny (m.in. podatny na POODLE)."
+        return "CRITICAL", "The SSL protocol is obsolete and considered insecure (e.g. vulnerable to POODLE)."
     if "1_0" in v or "1.0" in v:
-        return "HIGH", "TLS 1.0 jest przestarzały (m.in. podatny na BEAST) i wycofywany przez większość klientów/przeglądarek."
+        return "HIGH", "TLS 1.0 is obsolete (e.g. vulnerable to BEAST) and being phased out by most clients/browsers."
     if "1_1" in v or "1.1" in v:
-        return "MEDIUM", "TLS 1.1 jest przestarzały - zalecane wyłączenie na rzecz TLS 1.2/1.3."
+        return "MEDIUM", "TLS 1.1 is obsolete - disabling it in favor of TLS 1.2/1.3 is recommended."
     if "1_2" in v or "1.2" in v:
-        return "GOOD", "TLS 1.2 jest akceptowalny; rekomendowane jest jednak wsparcie/preferowanie TLS 1.3."
+        return "GOOD", "TLS 1.2 is acceptable; supporting/preferring TLS 1.3 is still recommended."
     if "1_3" in v or "1.3" in v:
-        return "GOOD", "TLS 1.3 - aktualny, rekomendowany standard szyfrowania transportu."
-    return "INFO", "Nierozpoznana wersja protokołu - zweryfikuj ręcznie."
+        return "GOOD", "TLS 1.3 - current, recommended transport encryption standard."
+    return "INFO", "Unrecognized protocol version - verify manually."
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +697,7 @@ def analyze_encryption(report):
             any_tls_seen = True
             tls = hop["tls"]
             sev, note = classify_tls_version(tls["version"])
-            bits_str = f", {tls['bits']} bitów" if tls["bits"] else ""
+            bits_str = f", {tls['bits']} bits" if tls["bits"] else ""
             report.add(
                 "Encryption", sev,
                 f"Hop #{idx} ({hop.get('from_host')} -> {hop.get('by_host')}): "
@@ -703,16 +707,16 @@ def analyze_encryption(report):
             if WEAK_CIPHER_RE.search(tls["cipher"]):
                 report.add(
                     "Encryption", "HIGH",
-                    f"Hop #{idx}: słaby zestaw szyfrów ({tls['cipher']})",
-                    "Wykryto oznaki słabego cipher suite (RC4/DES/3DES/EXPORT/NULL/MD5/anon) "
-                    "- podatny na znane ataki kryptograficzne, powinien zostać wyłączony na serwerze."
+                    f"Hop #{idx}: weak cipher suite ({tls['cipher']})",
+                    "Signs of a weak cipher suite detected (RC4/DES/3DES/EXPORT/NULL/MD5/anon) "
+                    "- vulnerable to known cryptographic attacks, should be disabled on the server."
                 )
             elif not AEAD_CIPHER_RE.search(tls["cipher"]):
                 report.add(
                     "Encryption", "LOW",
-                    f"Hop #{idx}: cipher {tls['cipher']} bez trybu AEAD (GCM/ChaCha20/CCM)",
-                    "Nie jest to krytyczny błąd, ale preferowane sa nowoczesne tryby AEAD "
-                    "zamiast starszych trybów blokowych (np. CBC)."
+                    f"Hop #{idx}: cipher {tls['cipher']} without an AEAD mode (GCM/ChaCha20/CCM)",
+                    "Not a critical flaw, but modern AEAD modes are preferred "
+                    "over older block modes (e.g. CBC)."
                 )
         else:
             # No TLS evidence for this network hop. This is NOT conclusive proof
@@ -723,22 +727,22 @@ def analyze_encryption(report):
                 report.add(
                     "Encryption", "LOW",
                     f"Hop #{idx} ({hop.get('from_host')} -> {hop.get('by_host')}): "
-                    f"brak potwierdzenia szyfrowania TLS (protokół zgłaszany jako '{protocol}')",
-                    "Nagłówek nie zawiera informacji o TLS, a zgłaszany protokół nie ma "
-                    "sufiksu 'S' (np. ESMTP zamiast ESMTPS) - może oznaczać transmisję "
-                    "w postaci jawnej (plaintext) między serwerami, lub serwer po prostu "
-                    "nie loguje tej informacji. Zalecana weryfikacja ręcznie (np. testssl.sh/openssl "
-                    "wobec danego MTA) i wymuszenie STARTTLS/MTA-STS."
+                    f"no confirmation of TLS encryption (protocol reported as '{protocol}')",
+                    "The header contains no TLS information, and the reported protocol has no "
+                    "'S' suffix (e.g. ESMTP instead of ESMTPS) - this may indicate plaintext "
+                    "transmission between servers, or the server simply "
+                    "does not log this information. Manual verification is recommended (e.g. testssl.sh/openssl "
+                    "against the given MTA) along with enforcing STARTTLS/MTA-STS."
                 )
 
     if not any_tls_seen and any(not h["is_loopback_hop"] for h in hops):
         report.add(
             "Encryption", "INFO",
-            "Brak jakichkolwiek informacji o TLS w całym łańcuchu Received",
-            "Nagłówki tej wiadomości nie zawierają danych o szyfrowaniu transportu na "
-            "żadnym z hopów sieciowych - może to wynikać z konfiguracji serwera "
-            "(brak logowania) lub braku szyfrowania. Zalecana weryfikacja MTA-STS/TLS-RPT "
-            "oraz ręcznego testu STARTTLS domeny."
+            "No TLS information anywhere in the Received chain",
+            "This message's headers contain no data on transport encryption on "
+            "any of the network hops - this may result from the server configuration "
+            "(no logging) or from a lack of encryption. Verifying MTA-STS/TLS-RPT "
+            "and manually testing STARTTLS for the domain is recommended."
         )
 
 
@@ -815,34 +819,34 @@ def analyze_auth(msg, report):
     def verdict(name, result, good_values=("pass",)):
         if result is None:
             report.add("Authentication", "MEDIUM",
-                        f"{name}: brak informacji w nagłówkach tej wiadomości",
-                        f"Nie znaleziono wyniku {name} w Authentication-Results / dedykowanych "
-                        f"nagłówkach. Może oznaczać ze serwer odbiorcy nie weryfikuje {name}, "
-                        f"nie dopisuje wyniku, lub nagłówki zostały usunięte.")
+                        f"{name}: no information in this message's headers",
+                        f"No {name} result found in Authentication-Results / dedicated "
+                        f"headers. This may mean the recipient server does not verify {name}, "
+                        f"does not add the result, or the headers were removed.")
             return
         if result in good_values:
             report.add("Authentication", "GOOD", f"{name}: {result}",
-                        f"Weryfikacja {name} zakończona wynikiem pozytywnym.")
+                        f"{name} verification completed with a positive result.")
         elif result in ("fail", "hardfail"):
             report.add("Authentication", "HIGH", f"{name}: {result.upper()}",
-                        f"Weryfikacja {name} nie powiodła się - silny wskaźnik możliwego "
-                        f"spoofingu / błędu konfiguracji SPF/DKIM/DMARC.")
+                        f"{name} verification failed - strong indicator of possible "
+                        f"spoofing / SPF/DKIM/DMARC misconfiguration.")
         elif result in ("softfail", "neutral", "none"):
             report.add("Authentication", "MEDIUM", f"{name}: {result}",
-                        f"Wynik {name} nie jest jednoznacznie pozytywny - warto zweryfikować "
-                        f"konfigurację rekordów DNS domeny nadawcy.")
+                        f"The {name} result is not clearly positive - consider verifying "
+                        f"the sender domain's DNS record configuration.")
         elif result in ("temperror", "permerror"):
             report.add("Authentication", "MEDIUM", f"{name}: {result}",
-                        f"Błąd podczas weryfikacji {name} (problem z DNS/składnia rekordu).")
+                        f"Error during {name} verification (DNS problem/record syntax).")
         else:
-            report.add("Authentication", "LOW", f"{name}: {result}", "Nietypowy wynik - zweryfikuj ręcznie.")
+            report.add("Authentication", "LOW", f"{name}: {result}", "Unusual result - verify manually.")
 
     verdict("SPF", spf_result)
     verdict("DKIM", dkim_result)
     verdict("DMARC", dmarc_result, good_values=("pass",))
 
     if spf_comment:
-        report.add("Authentication", "INFO", "Szczegóły weryfikacji SPF (z Authentication-Results)",
+        report.add("Authentication", "INFO", "SPF verification details (from Authentication-Results)",
                     spf_comment.strip())
 
     # DMARC enforcement policy detail: pass/fail alone doesn't say whether the
@@ -853,21 +857,21 @@ def analyze_auth(msg, report):
         sp = pol_tags.get("sp", "").lower()
         if p:
             if p == "reject":
-                report.add("Authentication", "GOOD", f"Polityka DMARC domeny: p={p}",
-                            "Domena wymusza odrzucanie wiadomości niezgodnych z SPF/DKIM (alignment) "
-                            "- najsilniejszy poziom ochrony przed spoofingiem.")
+                report.add("Authentication", "GOOD", f"Domain DMARC policy: p={p}",
+                            "The domain enforces rejection of messages failing SPF/DKIM (alignment) "
+                            "- the strongest level of protection against spoofing.")
             elif p == "quarantine":
-                report.add("Authentication", "GOOD", f"Polityka DMARC domeny: p={p}",
-                            "Domena kieruje niezgodne wiadomości do kwarantanny/spamu - dobra ochrona, "
-                            "choć słabsza niż p=reject.")
+                report.add("Authentication", "GOOD", f"Domain DMARC policy: p={p}",
+                            "The domain sends non-compliant messages to quarantine/spam - good protection, "
+                            "though weaker than p=reject.")
             elif p == "none":
-                report.add("Authentication", "MEDIUM", f"Polityka DMARC domeny: p={p}",
-                            "Tryb wyłącznie monitorujący - niezgodne wiadomości SA DOSTARCZANE. "
-                            "Domena nie jest realnie chroniona przed spoofingiem mimo publikacji rekordu DMARC.")
+                report.add("Authentication", "MEDIUM", f"Domain DMARC policy: p={p}",
+                            "Monitoring-only mode - non-compliant messages ARE DELIVERED. "
+                            "The domain is not effectively protected against spoofing despite publishing a DMARC record.")
             if sp and sp != p:
-                report.add("Authentication", "INFO", f"Polityka DMARC dla subdomen: sp={sp}",
-                            "Osobna (słabsza/silniejsza) polityka egzekwowana dla subdomen - warto "
-                            "zweryfikować spójność z polityką główną.")
+                report.add("Authentication", "INFO", f"DMARC policy for subdomains: sp={sp}",
+                            "A separate (weaker/stronger) policy is enforced for subdomains - consider "
+                            "verifying consistency with the main policy.")
 
     # DKIM signature detail analysis (algorithm, domain alignment)
     for dk in dkim_headers:
@@ -879,28 +883,28 @@ def analyze_auth(msg, report):
             report.dkim_selectors.append(f"{selector}._domainkey.{d_domain}" if d_domain else selector)
         if "sha1" in algo.lower():
             report.add("Authentication", "MEDIUM",
-                        f"Słaby algorytm podpisu DKIM: {algo}",
-                        "SHA-1 uznawany za kryptograficznie słaby - rekomendowany rsa-sha256 lub silniejszy.")
+                        f"Weak DKIM signature algorithm: {algo}",
+                        "SHA-1 is considered cryptographically weak - rsa-sha256 or stronger is recommended.")
         elif algo:
             report.add("Authentication", "GOOD",
-                        f"DKIM: silny algorytm podpisu ({algo}), domena d={d_domain}, selector s={selector}",
-                        "Algorytm podpisu DKIM zgodny z aktualnymi rekomendacjami.")
+                        f"DKIM: strong signature algorithm ({algo}), domain d={d_domain}, selector s={selector}",
+                        "The DKIM signature algorithm complies with current recommendations.")
         if d_domain and from_domain and d_domain.lower() != from_domain.lower():
             report.add("Authentication", "LOW",
-                        f"DKIM d={d_domain} różny od domeny From ({from_domain})",
-                        "Może być normalne przy wysyłce przez zewnętrzny ESP (np. SendGrid/Mailgun) "
-                        "ale warto zweryfikować zgodność z polityka DMARC (alignment).")
+                        f"DKIM d={d_domain} differs from the From domain ({from_domain})",
+                        "May be normal when sending through an external ESP (e.g. SendGrid/Mailgun) "
+                        "but it is worth verifying consistency with the DMARC policy (alignment).")
 
         # l= (body length limit) lets an attacker append arbitrary unsigned
         # content after the signed portion without invalidating the DKIM
         # signature - a well-known, concrete DKIM weakness worth flagging.
         if "l" in tags:
             report.add("Authentication", "HIGH",
-                        f"DKIM-Signature zawiera znacznik l={tags['l']} (body length limit)",
-                        "Znacznik l= ogranicza podpisany fragment treści wiadomości - pozwala "
-                        "doklejć niepodpisaną zawartość po podpisanej części bez unieważnienia "
-                        "podpisu DKIM (tzw. DKIM length-attribute attack). Zalecane usunięcie "
-                        "tego znacznika (podpisywanie całej treści).")
+                        f"DKIM-Signature contains the l={tags['l']} tag (body length limit)",
+                        "The l= tag limits the signed portion of the message body - it allows "
+                        "appending unsigned content after the signed part without invalidating "
+                        "the DKIM signature (the so-called DKIM length-attribute attack). Removing "
+                        "this tag (signing the entire body) is recommended.")
 
         # Expiry check (t=created, x=expires, both unix timestamps)
         if "x" in tags:
@@ -909,9 +913,9 @@ def analyze_auth(msg, report):
                 if exp_ts < datetime.now(timezone.utc).timestamp():
                     exp_dt = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
                     report.add("Authentication", "LOW",
-                                f"Podpis DKIM ma znacznik x= (wygasł: {exp_dt.isoformat()})",
-                                "Zgodnie ze specyfikacją DKIM podpis po dacie wygasnięcia powinien "
-                                "być traktowany jako nieważny, choć wiele weryfikatorów to ignoruje.")
+                                f"DKIM signature has an x= tag (expired: {exp_dt.isoformat()})",
+                                "According to the DKIM specification, a signature past its expiry date should "
+                                "be treated as invalid, although many verifiers ignore this.")
             except (ValueError, OSError):
                 pass
 
@@ -920,28 +924,28 @@ def analyze_auth(msg, report):
             for prov_name, pat in KNOWN_SELECTOR_PATTERNS:
                 if pat.match(selector):
                     report.add("Authentication", "INFO",
-                                f"Selector DKIM '{selector}' wskazuje na: {prov_name}",
-                                "Nazewnictwo selektora ujawnia prawdopodobnego dostawcę poczty "
-                                "według znanej konwencji nazewniczej.")
+                                f"DKIM selector '{selector}' points to: {prov_name}",
+                                "The selector naming reveals the likely mail provider "
+                                "according to a well-known naming convention.")
                     break
             env_m = ENV_INDICATOR_RE.search(selector)
             if env_m:
                 report.add("Authentication", "LOW",
-                            f"Selector DKIM '{selector}' ujawnia wskaźnik środowiska: {env_m.group(1)}",
-                            "Nazwa selektora sugeruje środowisko (dev/test/staging/prod) - drobny "
-                            "wyciek informacji o organizacji infrastruktury nadawcy.")
+                            f"DKIM selector '{selector}' reveals an environment indicator: {env_m.group(1)}",
+                            "The selector name suggests an environment (dev/test/staging/prod) - a minor "
+                            "leak of information about the sender's infrastructure organization.")
 
     if from_domain and return_path_domain and from_domain != return_path_domain:
         report.add("Authentication", "LOW",
-                    f"Return-Path ({return_path_domain}) różny od domeny From ({from_domain})",
-                    "Typowe przy użyciu list mailingowych/ESP, ale to takze klasyczny wzorzec "
-                    "wykorzystywany w phishingu/BEC - warto zweryfikować kontekst.")
+                    f"Return-Path ({return_path_domain}) differs from the From domain ({from_domain})",
+                    "Typical when using mailing lists/ESPs, but also a classic pattern "
+                    "used in phishing/BEC - verify the context.")
 
     if not auth_results_headers and not received_spf_headers and not dkim_headers:
         report.add("Authentication", "MEDIUM",
-                    "Brak jakichkolwiek nagłówków uwierzytelniania poczty (SPF/DKIM/DMARC/ARC)",
-                    "Albo serwer odbiorcy nie wykonuje/nie dopisuje tych weryfikacji, albo "
-                    "nagłówki zostały usunięte przed przekazaniem pliku do analizy.")
+                    "No e-mail authentication headers at all (SPF/DKIM/DMARC/ARC)",
+                    "Either the recipient server does not perform/add these verifications, or "
+                    "the headers were removed before the file was submitted for analysis.")
 
     report.auth = auth_info
 
@@ -978,9 +982,9 @@ def analyze_interesting(msg, report):
         reply_domain = get_domain(reply_to_addr)
         if from_domain and reply_domain and from_domain != reply_domain:
             report.add("Interesting Headers", "MEDIUM",
-                        f"Reply-To ({reply_to_addr}) wskazuje na inna domenę niż From ({from_addr})",
-                        "Klasyczny wzorzec wykorzystywany w atakach BEC/phishing - odpowiedź "
-                        "trafia na inny adres/domenę niż widoczny nadawca.")
+                        f"Reply-To ({reply_to_addr}) points to a different domain than From ({from_addr})",
+                        "A classic pattern used in BEC/phishing attacks - replies "
+                        "go to a different address/domain than the visible sender.")
 
     # Message-ID domain vs From domain
     msg_id = msg.get("Message-ID", "")
@@ -990,24 +994,24 @@ def analyze_interesting(msg, report):
         from_domain = get_domain(from_addr)
         if from_domain and mid_domain != from_domain:
             report.add("Interesting Headers", "LOW",
-                        f"Domena w Message-ID ({mid_domain}) różni się od domeny From ({from_domain})",
-                        "Może wskazywać na wysyłkę przez zewnętrzny system (ESP/CRM/marketing "
-                        "automation) generujący wiadomości w imieniu domeny From - warto zidentyfikować "
-                        "faktyczny system wysyłający (dodatkowy wektor rekonesansu).")
+                        f"The Message-ID domain ({mid_domain}) differs from the From domain ({from_domain})",
+                        "May indicate sending through an external system (ESP/CRM/marketing "
+                        "automation) generating messages on behalf of the From domain - worth identifying "
+                        "the actual sending system (an additional recon vector).")
 
     # X-Spam-Status can reveal spam filter engine + thresholds
     spam_status = msg.get("X-Spam-Status")
     if spam_status:
         report.add("Interesting Headers", "LOW",
-                    "Ujawniony status/parametry filtra antyspamowego (X-Spam-Status)",
-                    f"Wartość: {spam_status[:200]} - może ujawniać używany silnik "
-                    "(np. SpamAssassin) i progi punktowe, przydatne do omijania filtrów.")
+                    "Anti-spam filter status/parameters disclosed (X-Spam-Status)",
+                    f"Value: {spam_status[:200]} - may reveal the engine in use "
+                    "(e.g. SpamAssassin) and score thresholds, useful for bypassing filters.")
 
     # Precedence: bulk/list-unsubscribe can indicate marketing/automation infra
     if msg.get("List-Unsubscribe"):
         report.add("Interesting Headers", "INFO",
-                    "Nagłówek List-Unsubscribe obecny",
-                    "Wskazuje na wysyłkę masowa/marketingowa (ESP) a nie klienta pocztowego 1:1.")
+                    "List-Unsubscribe header present",
+                    "Indicates bulk/marketing sending (ESP) rather than a 1:1 mail client.")
 
 
 # ---------------------------------------------------------------------------
@@ -1022,19 +1026,19 @@ def analyze_internal_disclosure(report):
     for host in report.hostnames:
         signals = []
         if INTERNAL_DOMAIN_SUFFIX_RE.search(host):
-            signals.append("wewnętrzny sufiks domeny (.local/.internal/.corp/.lan)")
+            signals.append("internal domain suffix (.local/.internal/.corp/.lan)")
         if INFRA_ROLE_HOSTNAME_RE.match(host):
-            signals.append("nazwa sugerująca rolę infrastruktury (np. dcNN/mailNN/exchangeNN)")
+            signals.append("name suggesting an infrastructure role (e.g. dcNN/mailNN/exchangeNN)")
         env_m = ENV_INDICATOR_RE.search(host)
         if env_m:
-            signals.append(f"wskaźnik środowiska w nazwie: '{env_m.group(1)}'")
+            signals.append(f"environment indicator in the name: '{env_m.group(1)}'")
 
         if signals:
             report.add(
                 "Information Disclosure", "MEDIUM",
-                f"Ujawniona nazwa hosta sugerująca wewnętrzną infrastrukturę: {host}",
-                "; ".join(signals) + ". Tego typu nazwy ułatwiają mapowanie struktury sieci "
-                "wewnętrznej/organizacyjnej celu i bywają przydatne przy dalszym rekonesansie."
+                f"Disclosed hostname suggesting internal infrastructure: {host}",
+                "; ".join(signals) + ". Names of this kind make it easier to map the target's internal/"
+                                     "organizational network structure and are useful for further recon."
             )
 
 
@@ -1106,40 +1110,40 @@ def analyze_dmarc_alignment(msg, report):
 
     report.add(
         "Authentication", "GOOD" if spf_aligned else ("MEDIUM" if spf_aligned is False else "INFO"),
-        f"SPF alignment (obliczone lokalnie): {fmt(spf_aligned)}",
-        f"From: {from_domain}  vs  SPF/mailfrom: {spf_mailfrom_domain or 'brak danych'}  "
-        f"(tryb: {aspf})."
+        f"SPF alignment (computed locally): {fmt(spf_aligned)}",
+        f"From: {from_domain}  vs  SPF/mailfrom: {spf_mailfrom_domain or 'no data'}  "
+        f"(mode: {aspf})."
     )
     if dkim_domains:
         report.add(
             "Authentication", "GOOD" if dkim_aligned else "MEDIUM",
-            f"DKIM alignment (obliczone lokalnie): {fmt(dkim_aligned)}",
-            f"From: {from_domain}  vs  DKIM d=: {', '.join(sorted(dkim_domains))}  (tryb: {adkim})."
+            f"DKIM alignment (computed locally): {fmt(dkim_aligned)}",
+            f"From: {from_domain}  vs  DKIM d=: {', '.join(sorted(dkim_domains))}  (mode: {adkim})."
         )
 
     if spf_aligned and dkim_aligned is False:
         report.add(
             "Authentication", "INFO",
-            "DMARC przechodzi wyłącznie dzięki alignmentowi SPF - obecny DKIM jest niezgodny",
-            "Wiadomość formalnie przechodzi DMARC (wystarczy jeden z dwóch mechanizmów), ale "
-            "podpis DKIM wskazuje domenę (d=) niepowiązaną z domeną From. To legalny wzorzec "
-            "przy wysyłce przez ESP/relay, ale warto zweryfikować czy jest to oczekiwana ścieżka."
+            "DMARC passes solely thanks to SPF alignment - the present DKIM is misaligned",
+            "The message formally passes DMARC (one of the two mechanisms is enough), but "
+            "the DKIM signature points to a domain (d=) unrelated to the From domain. This is a legitimate pattern "
+            "when sending through an ESP/relay, but it is worth verifying whether this is the expected path."
         )
     elif dkim_aligned and spf_aligned is False:
         report.add(
             "Authentication", "INFO",
-            "DMARC przechodzi wyłącznie dzięki alignmentowi DKIM - identity SPF jest niezgodna",
-            "Wiadomość formalnie przechodzi DMARC, ale domena z SPF (smtp.mailfrom) jest inna "
-            "niż domena From. To legalny wzorzec przy wysyłce przez ESP/relay (np. bounce "
-            "przez inna domenę), ale warto zweryfikować czy jest to oczekiwana ścieżka wysyłki."
+            "DMARC passes solely thanks to DKIM alignment - the SPF identity is misaligned",
+            "The message formally passes DMARC, but the SPF domain (smtp.mailfrom) differs "
+            "from the From domain. This is a legitimate pattern when sending through an ESP/relay (e.g. bounces "
+            "via another domain), but it is worth verifying whether this is the expected sending path."
         )
     elif spf_aligned is False and dkim_aligned is False:
         report.add(
             "Authentication", "HIGH",
-            "Ani SPF, ani DKIM nie są zgodne (aligned) z domena From",
-            "Mimo ewentualnego dmarc=pass raportowanego przez odbiorcę, lokalna korelacja nie "
-            "potwierdza powiązania żadnego mechanizmu z widoczną domena nadawcy - zweryfikuj "
-            "ręcznie, to nietypowa/podejrzana konfiguracja."
+            "Neither SPF nor DKIM is aligned with the From domain",
+            "Despite a possible dmarc=pass reported by the recipient, local correlation does not "
+            "confirm that any mechanism is tied to the visible sender domain - verify "
+            "manually, this is an unusual/suspicious configuration."
         )
 
 
@@ -1169,26 +1173,26 @@ def analyze_arc_chain(msg, report):
     if not (seal_i or msig_i or ar_i):
         return
 
-    report.add("Authentication", "INFO", f"Łańcuch ARC obecny (instancje: {sorted(seal_i)})",
-                "ARC pozwala pośrednikom (np. listom mailingowym) zachować oryginalny wynik "
-                "uwierzytelniania mimo modyfikacji wiadomości po drodze.")
+    report.add("Authentication", "INFO", f"ARC chain present (instances: {sorted(seal_i)})",
+                "ARC lets intermediaries (e.g. mailing lists) preserve the original "
+                "authentication result despite modifications to the message along the way.")
 
     if seal_i != msig_i or seal_i != ar_i:
         report.add(
             "Authentication", "LOW",
-            "Niespójna numeracja instancji (i=) między ARC-Seal/ARC-Message-Signature/ARC-Authentication-Results",
+            "Inconsistent instance numbering (i=) between ARC-Seal/ARC-Message-Signature/ARC-Authentication-Results",
             f"ARC-Seal: {sorted(seal_i)}, ARC-Message-Signature: {sorted(msig_i)}, "
-            f"ARC-Authentication-Results: {sorted(ar_i)}. Powinny być identyczne - rozbieżność "
-            "może wskazywać na niekompletny/uszkodzony łańcuch ARC lub manipulacje nagłówkami."
+            f"ARC-Authentication-Results: {sorted(ar_i)}. They should be identical - a discrepancy "
+            "may indicate an incomplete/corrupted ARC chain or header tampering."
         )
 
     expected = set(range(1, max(seal_i, default=0) + 1))
     if seal_i and seal_i != expected:
         report.add(
             "Authentication", "LOW",
-            f"Łańcuch ARC ma przerwę w numeracji instancji: {sorted(seal_i)} (oczekiwano 1..{max(seal_i)})",
-            "Ciągła numeracja i=1,2,3... jest wymagana dla poprawnego łańcucha ARC - luka "
-            "sugeruje usunięte/pominięte ogniwo łańcucha pośredników."
+            f"ARC chain has a gap in instance numbering: {sorted(seal_i)} (expected 1..{max(seal_i)})",
+            "Contiguous numbering i=1,2,3... is required for a valid ARC chain - a gap "
+            "suggests a removed/skipped link in the intermediary chain."
         )
 
 
@@ -1205,10 +1209,10 @@ def analyze_injection(msg, raw_bytes, report):
         if len(vals) > 1:
             report.add(
                 "Injection", "HIGH",
-                f"Nagłówek '{hname}' występuje {len(vals)} razy (powinien wystąpić max. raz)",
-                "Silny wskaźnik header injection - np. formularz wysyłkowy (PHP mail()/"
-                "PHPMailer bez należnej sanityzacji) pozwalający wstrzyknąć dodatkowe "
-                "nagłówki (Bcc/Cc/To) poprzez znaki CR/LF w polu wejściowym."
+                f"Header '{hname}' appears {len(vals)} times (should appear at most once)",
+                "Strong header injection indicator - e.g. a sending form (PHP mail()/"
+                "PHPMailer without proper sanitization) that allows injecting additional "
+                "headers (Bcc/Cc/To) via CR/LF characters in an input field."
             )
 
     # 2) Encoded/escaped CRLF sequences that leaked into a header value instead
@@ -1219,10 +1223,10 @@ def analyze_injection(msg, raw_bytes, report):
         if INJECTION_ENCODED_CRLF_RE.search(val_str):
             report.add(
                 "Injection", "MEDIUM",
-                f"Podejrzana zakodowana sekwencja CRLF w nagłówku '{name}'",
-                f"Wartość zawiera '%0d%0a'/'\\r\\n' w formie literalnej: {val_str[:150]} "
-                "- może być pozostałością po (nieudanej) próbie header injection "
-                "wobec formularza generującego te wiadomość."
+                f"Suspicious encoded CRLF sequence in header '{name}'",
+                f"Value contains a literal '%0d%0a'/'\\r\\n': {val_str[:150]} "
+                "- may be a remnant of a (failed) header injection attempt "
+                "against the form generating this message."
             )
 
     # 3) Raw control characters in the header block of the ORIGINAL file
@@ -1234,9 +1238,9 @@ def analyze_injection(msg, raw_bytes, report):
         if control_chars:
             report.add(
                 "Injection", "MEDIUM",
-                "Wykryto niestandardowe znaki kontrolne w sekcji nagłówków",
-                f"Znalezione bajty kontrolne (ord): {sorted(set(ord(c) for c in control_chars))} "
-                "- może być artefaktem próby header injection lub uszkodzenia pliku."
+                "Non-standard control characters detected in the header section",
+                f"Control bytes found (ord): {sorted(set(ord(c) for c in control_chars))} "
+                "- may be an artifact of a header injection attempt or file corruption."
             )
     except Exception:
         pass
@@ -1267,11 +1271,11 @@ def analyze_relay_heuristics(msg, report, use_dns):
         if not provider_names:
             report.add(
                 "Relay/Spoofing", "LOW",
-                f"Serwer źródłowy ({origin_host}) nie jest powiązany z domena nadawcy ({from_domain}) "
-                "ani z rozpoznanym dostawca poczty (ESP)",
-                "Heurystyka - typowe również przy legalnej wysyłce przez zewnętrzny CRM/system "
-                "mailingowy. Warto zweryfikować ręcznie czy to autoryzowany nadawca w imieniu "
-                "domeny (np. wpis w SPF) czy potencjalny relay/spoofing."
+                f"The source server ({origin_host}) is not associated with the sender domain ({from_domain}) "
+                "or with a recognized mail provider (ESP)",
+                "Heuristic - also typical of legitimate sending through an external CRM/mailing "
+                "system. Verify manually whether this is an authorized sender on behalf of the "
+                "domain (e.g. an SPF entry) or a potential relay/spoofing."
             )
 
     # Reverse-DNS (PTR) consistency check for the origin hop's public IP -
@@ -1288,19 +1292,19 @@ def analyze_relay_heuristics(msg, report, use_dns):
                         ptr_host_clean.split(".")[-2:] != claimed.split(".")[-2:]:
                     report.add(
                         "Relay/Spoofing", "MEDIUM",
-                        f"Niezgodność HELO/rDNS dla {ip}: nagłówek deklaruje '{origin_host}', "
-                        f"a PTR wskazuje na '{ptr_host}'",
-                        "Rozbieżność między deklarowana nazwa hosta (HELO/EHLO) a rzeczywistym "
-                        "wpisem PTR w DNS - typowa dla spoofingu nadawcy lub relaya bez "
-                        "poprawnej konfiguracji DNS. Zweryfikuj ręcznie."
+                        f"HELO/rDNS mismatch for {ip}: the header declares '{origin_host}', "
+                        f"while PTR points to '{ptr_host}'",
+                        "Discrepancy between the declared hostname (HELO/EHLO) and the actual "
+                        "PTR record in DNS - typical of sender spoofing or a relay without "
+                        "proper DNS configuration. Verify manually."
                     )
             except (socket.herror, socket.gaierror, socket.timeout, OSError):
                 report.add(
                     "Relay/Spoofing", "INFO",
-                    f"Brak wpisu PTR (reverse DNS) dla {ip}",
-                    "Adres IP źródłowego hopa nie posiada wpisu PTR - niekoniecznie problem, "
-                    "ale utrudnia weryfikację tożsamości serwera i bywa charakterystyczne dla "
-                    "źle skonfigurowanych/nielegalnych relay'ow."
+                    f"No PTR record (reverse DNS) for {ip}",
+                    "The source hop's IP address has no PTR record - not necessarily a problem, "
+                    "but it makes verifying the server's identity harder and is characteristic of "
+                    "misconfigured/illegitimate relays."
                 )
 
 
@@ -1349,11 +1353,11 @@ def analyze_timing(msg, report):
             sev = "MEDIUM" if abs(delta_h) > 168 else "LOW"
             report.add(
                 "OSINT/Recon", sev,
-                f"Rozbieżność między nagłówkiem Date a czasem odebrania wiadomości: ~{abs(delta_h):.1f}h",
-                f"Date: {date_header}  vs.  hop Received #{newest_idx}: {newest_dt.isoformat()}. "
-                "Duża rozbieżność zwykle wynika z błędu zegara serwera nadawcy, ale warto "
-                "zweryfikować czy nagłówek Date nie został ręcznie zmieniony (np. w celu "
-                "zafałszowania chronologii incydentu)."
+                f"Discrepancy between the Date header and the time the message was received: ~{abs(delta_h):.1f}h",
+                f"Date: {date_header}  vs.  Received hop #{newest_idx}: {newest_dt.isoformat()}. "
+                "A large discrepancy usually results from a clock error on the sender's server, but it is worth "
+                "verifying that the Date header was not manually altered (e.g. to "
+                "falsify an incident's chronology)."
             )
 
     # Chronological order: hops[0] (most recently added / closest to recipient)
@@ -1373,18 +1377,18 @@ def analyze_timing(msg, report):
         if dt_a < dt_b - timedelta(minutes=2):
             report.add(
                 "OSINT/Recon", "LOW",
-                f"Nagłówki Received #{idx_a} i #{idx_b} mają odwrócona kolejność czasowa",
-                f"Hop #{idx_a} ({dt_a.isoformat()}) powinien być równy lub późniejszy niż "
-                f"hop #{idx_b} ({dt_b.isoformat()}) w łańcuchu, a jest wcześniejszy - typowo "
-                "różnica stref czasowych/zegarów między serwerami, rzadziej modyfikacja nagłówka."
+                f"Received headers #{idx_a} and #{idx_b} are in reversed chronological order",
+                f"Hop #{idx_a} ({dt_a.isoformat()}) should be equal to or later than "
+                f"hop #{idx_b} ({dt_b.isoformat()}) in the chain, but it is earlier - typically "
+                "a time zone/clock difference between servers, less often a header modification."
             )
         elif delta_s > 3600:
             report.add(
                 "OSINT/Recon", "LOW",
-                f"Duża przerwa czasowa między hopami #{idx_b} i #{idx_a}: ~{delta_s/3600:.1f}h",
-                "Może wynikać z kolejkowania na serwerze pośrednim (np. greylisting, "
-                "kolejka antyspamowa, batch relay) - rzadziej z celowego opóźnienia "
-                "wprowadzonego przez pośrednika."
+                f"Large time gap between hops #{idx_b} and #{idx_a}: ~{delta_s/3600:.1f}h",
+                "May result from queuing on an intermediate server (e.g. greylisting, "
+                "anti-spam queue, batch relay) - less often from a deliberate delay "
+                "introduced by an intermediary."
             )
 
 
@@ -1405,17 +1409,17 @@ def analyze_message_id(msg, report):
     if MESSAGE_ID_NUMERIC_RE.match(local):
         report.add(
             "OSINT/Recon", "LOW",
-            f"Message-ID ma prosta, numeryczna część lokalna: '{local}'",
-            "Sugeruje możliwy sekwencyjny/przewidywalny generator identyfikatorów po stronie "
-            "systemu nadającego - potencjalnie umożliwia zgadywanie/enumeracje innych "
-            "wiadomości wygenerowanych przez ten sam system (np. potwierdzeń/rezerwacji)."
+            f"Message-ID has a simple, numeric local part: '{local}'",
+            "Suggests a possibly sequential/predictable identifier generator on the "
+            "sending system's side - potentially allows guessing/enumerating other "
+            "messages generated by the same system (e.g. confirmations/reservations)."
         )
     elif MESSAGE_ID_SHORT_HEX_RE.match(local):
         report.add(
             "OSINT/Recon", "LOW",
-            f"Message-ID ma krótka, niskoentropijna część lokalna: '{local}'",
-            "Krótki identyfikator hex może wskazywać na słaby generator losowości używany "
-            "do budowy Message-ID - potencjalny (niski) wektor do enumeracji wiadomości."
+            f"Message-ID has a short, low-entropy local part: '{local}'",
+            "A short hex identifier may indicate a weak randomness generator used "
+            "to build the Message-ID - a potential (low) vector for enumerating messages."
         )
 
 
@@ -1478,8 +1482,8 @@ def build_iocs(msg, report):
 # ---------------------------------------------------------------------------
 def analyze_dns(msg, report):
     if not HAS_DNS:
-        report.add("DNS", "INFO", "Pominięto żywe zapytania DNS",
-                    "Moduł 'dnspython' nie jest zainstalowany. Zainstaluj: pip install dnspython")
+        report.add("DNS", "INFO", "Live DNS queries skipped",
+                    "The 'dnspython' module is not installed. Install it with: pip install dnspython")
         return
 
     from_addr = email.utils.parseaddr(msg.get("From", ""))[1]
@@ -1498,25 +1502,25 @@ def analyze_dns(msg, report):
         spf_records = [r.to_text() for r in answers if "v=spf1" in r.to_text()]
         if spf_records:
             posture["spf"] = "found"
-            report.add("DNS", "INFO", f"Rekord SPF domeny {domain} znaleziony",
+            report.add("DNS", "INFO", f"SPF record found for domain {domain}",
                         "; ".join(spf_records))
             for rec in spf_records:
                 if "+all" in rec:
                     posture["spf"] = "weak (+all)"
-                    report.add("DNS", "CRITICAL", f"SPF domeny {domain} zawiera '+all'",
-                                "Pozwala na wysyłkę z DOWOLNEGO serwera bez odrzucenia - "
-                                "krytyczny błąd konfiguracji SPF.")
+                    report.add("DNS", "CRITICAL", f"SPF of domain {domain} contains '+all'",
+                                "Allows sending from ANY server without rejection - "
+                                "a critical SPF misconfiguration.")
                 elif "?all" in rec:
                     posture["spf"] = "weak (?all)"
-                    report.add("DNS", "MEDIUM", f"SPF domeny {domain} zawiera '?all' (neutral)",
-                                "Słaba polityka SPF - nie określa jednoznacznie co robić z "
-                                "nieautoryzowanymi źródłami.")
+                    report.add("DNS", "MEDIUM", f"SPF of domain {domain} contains '?all' (neutral)",
+                                "Weak SPF policy - does not clearly state what to do with "
+                                "unauthorized sources.")
         else:
             posture["spf"] = "missing"
-            report.add("DNS", "HIGH", f"Brak rekordu SPF dla domeny {domain}",
-                        "Domena nie publikuje polityki SPF - ułatwia spoofing adresu nadawcy.")
+            report.add("DNS", "HIGH", f"No SPF record for domain {domain}",
+                        "The domain does not publish an SPF policy - makes sender address spoofing easier.")
     except Exception as e:
-        report.add("DNS", "INFO", f"Nie udało się pobrać SPF dla {domain}", str(e))
+        report.add("DNS", "INFO", f"Could not fetch SPF for {domain}", str(e))
 
     # DMARC (_dmarc.<domain> TXT) - full tag parse: p/sp/pct/adkim/aspf/rua/ruf
     try:
@@ -1530,33 +1534,33 @@ def analyze_dns(msg, report):
             pct = tags.get("pct", "100").strip()
             posture["dmarc"] = f"p={p}" if p else "found"
 
-            report.add("DNS", "INFO", f"Rekord DMARC domeny {domain} znaleziony", rec)
+            report.add("DNS", "INFO", f"DMARC record found for domain {domain}", rec)
             if p == "none":
-                report.add("DNS", "MEDIUM", f"Polityka DMARC domeny {domain} ustawiona na p=none",
-                            "Wiadomości niezgodne z SPF/DKIM nie sa odrzucane ani kwarantannowane "
-                            "- tylko monitoring. Ułatwia spoofing.")
+                report.add("DNS", "MEDIUM", f"DMARC policy of domain {domain} is set to p=none",
+                            "Messages failing SPF/DKIM are neither rejected nor quarantined "
+                            "- monitoring only. Makes spoofing easier.")
             try:
                 pct_val = int(pct)
                 if pct_val < 100:
-                    report.add("DNS", "MEDIUM", f"DMARC domeny {domain} egzekwowany tylko dla {pct_val}% wiadomości (pct={pct_val})",
-                                "Częściowe wdrożenie DMARC - pozostała część niezgodnych wiadomości "
-                                "omija wymuszaną politykę (p=). Typowe w trakcie stopniowego wdrażania, "
-                                "ale oznacza realna lukę w ochronie do czasu pct=100.")
+                    report.add("DNS", "MEDIUM", f"DMARC of domain {domain} is enforced for only {pct_val}% of messages (pct={pct_val})",
+                                "Partial DMARC rollout - the remaining non-compliant messages "
+                                "bypass the enforced policy (p=). Typical during a gradual rollout, "
+                                "but it means a real protection gap until pct=100.")
             except ValueError:
                 pass
             if not tags.get("rua") and not tags.get("ruf"):
-                report.add("DNS", "LOW", f"Domena {domain} nie ma skonfigurowanego DMARC reportingu (rua/ruf)",
-                            "Brak adresów do raportów zbiorczych (rua) i forensycznych (ruf) - "
-                            "właściciel domeny nie otrzymuje widoczności nadużyć/prób spoofingu "
-                            "jego domeny, nawet jeśli polityka p= jest ustawiona poprawnie.")
+                report.add("DNS", "LOW", f"Domain {domain} has no DMARC reporting configured (rua/ruf)",
+                            "No addresses for aggregate (rua) and forensic (ruf) reports - "
+                            "the domain owner gets no visibility into abuse/spoofing attempts "
+                            "against their domain, even if the p= policy is set correctly.")
         else:
             posture["dmarc"] = "missing"
-            report.add("DNS", "HIGH", f"Brak rekordu DMARC dla domeny {domain}",
-                        "Brak polityki DMARC - domena nie chroni się przed spoofingiem na "
-                        "poziomie polityki odbiorczej.")
+            report.add("DNS", "HIGH", f"No DMARC record for domain {domain}",
+                        "No DMARC policy - the domain does not protect itself against spoofing at "
+                        "the receiving-policy level.")
     except Exception as e:
         posture["dmarc"] = "missing/error"
-        report.add("DNS", "HIGH", f"Brak/błąd rekordu DMARC dla {domain}", str(e))
+        report.add("DNS", "HIGH", f"No DMARC record / error for {domain}", str(e))
 
     # MX records - basic infra info
     try:
@@ -1564,7 +1568,7 @@ def analyze_dns(msg, report):
         mx_hosts = sorted([str(r.exchange).rstrip('.') for r in mx_answers])
         report.mx_hosts = mx_hosts
         posture["mx"] = ", ".join(mx_hosts) if mx_hosts else None
-        report.add("DNS", "INFO", f"Rekordy MX domeny {domain}", ", ".join(mx_hosts))
+        report.add("DNS", "INFO", f"MX records of domain {domain}", ", ".join(mx_hosts))
     except Exception:
         pass
 
@@ -1574,7 +1578,7 @@ def analyze_dns(msg, report):
         bimi_answers = resolver.resolve(f"default._bimi.{domain}", "TXT")
         bimi_records = [r.to_text() for r in bimi_answers if "v=bimi1" in r.to_text().lower()]
         if bimi_records:
-            report.add("DNS", "INFO", f"Rekord BIMI domeny {domain} znaleziony", bimi_records[0])
+            report.add("DNS", "INFO", f"BIMI record found for domain {domain}", bimi_records[0])
     except Exception:
         pass
 
@@ -1582,29 +1586,29 @@ def analyze_dns(msg, report):
     try:
         resolver.resolve(f"_mta-sts.{domain}", "TXT")
         posture["mta_sts"] = "found"
-        report.add("DNS", "GOOD", f"Domena {domain} publikuje rekord MTA-STS",
-                    "Wskazuje na wymuszanie szyfrowania TLS dla poczty przychodzącej na "
-                    "poziomie polityki - utrudnia atak downgrade/STARTTLS-stripping.")
+        report.add("DNS", "GOOD", f"Domain {domain} publishes an MTA-STS record",
+                    "Indicates policy-level enforcement of TLS encryption for inbound mail - "
+                    "makes downgrade/STARTTLS-stripping attacks harder.")
     except Exception:
         posture["mta_sts"] = "missing"
-        report.add("DNS", "LOW", f"Brak rekordu MTA-STS dla domeny {domain}",
-                    "Domena nie publikuje polityki MTA-STS - poczta przychodząca może być "
-                    "podatna na atak downgrade szyfrowania (STARTTLS stripping) jeśli "
-                    "serwer nadawcy na to pozwoli.")
+        report.add("DNS", "LOW", f"No MTA-STS record for domain {domain}",
+                    "The domain does not publish an MTA-STS policy - inbound mail may be "
+                    "vulnerable to an encryption downgrade attack (STARTTLS stripping) if "
+                    "the sending server allows it.")
 
     # TLS-RPT (SMTP TLS Reporting) - complements MTA-STS by giving the domain
     # owner visibility into failed TLS negotiations reported by other MTAs.
     try:
         resolver.resolve(f"_smtp._tls.{domain}", "TXT")
         posture["tls_rpt"] = "found"
-        report.add("DNS", "GOOD", f"Domena {domain} publikuje rekord TLS-RPT",
-                    "Domena otrzymuje raporty o nieudanych probach szyfrowania TLS od innych "
-                    "MTA - przydatne do wykrywania downgrade/stripping w praktyce.")
+        report.add("DNS", "GOOD", f"Domain {domain} publishes a TLS-RPT record",
+                    "The domain receives reports on failed TLS encryption attempts from other "
+                    "MTAs - useful for detecting downgrade/stripping in practice.")
     except Exception:
         posture["tls_rpt"] = "missing"
-        report.add("DNS", "LOW", f"Brak rekordu TLS-RPT dla domeny {domain}",
-                    "Domena nie ma widoczności w problemy z negocjacja TLS zgłaszane przez "
-                    "inne serwery - utrudnia wykrycie ataków downgrade w praktyce.")
+        report.add("DNS", "LOW", f"No TLS-RPT record for domain {domain}",
+                    "The domain has no visibility into TLS negotiation problems reported by "
+                    "other servers - makes detecting downgrade attacks in practice harder.")
 
     report.posture = posture
 
@@ -1666,17 +1670,17 @@ def analyze_dkim_key_strength(msg, report):
             answers = resolver.resolve(query, "TXT")
             raw_txt = b"".join(answers[0].strings).decode(errors="replace")
         except Exception as e:
-            report.add("DNS", "LOW", f"Nie udało się pobrać klucza DKIM dla {query}",
-                        f"Zapytanie DNS TXT nie powiodło się ({e}) - selector mógł zostać "
-                        "usunięty/zrotowany, lub domena używa innej lokalizacji klucza.")
+            report.add("DNS", "LOW", f"Could not fetch the DKIM key for {query}",
+                        f"The DNS TXT query failed ({e}) - the selector may have been "
+                        "removed/rotated, or the domain uses a different key location.")
             continue
 
         dns_tags = dict((k.lower(), v.strip()) for k, v in DKIM_TAG_RE.findall(raw_txt))
         p_value = dns_tags.get("p", "")
         if not p_value:
-            report.add("DNS", "MEDIUM", f"Rekord DKIM {query} nie zawiera aktywnego klucza publicznego",
-                        "Pusty tag p= oznacza unieważniony/wycofany selector (key revocation) - "
-                        "wiadomości podpisane tym selectorem nie przejdą juz weryfikacji DKIM.")
+            report.add("DNS", "MEDIUM", f"DKIM record {query} contains no active public key",
+                        "An empty p= tag means a revoked/retired selector (key revocation) - "
+                        "messages signed with this selector will no longer pass DKIM verification.")
             continue
 
         try:
@@ -1703,11 +1707,11 @@ def analyze_dkim_key_strength(msg, report):
 
             report.add(
                 "DNS", sev,
-                f"Klucz publiczny DKIM {query}: szacunkowo ~{approx_bits}-bit RSA",
-                f"Oszacowano na podstawie długości zdekodowanego klucza ({n} bajtów) - "
-                f"wartość przybliżona, nie parsuje pełnej struktury ASN.1. Klucze <=1024 bit "
-                f"sa uznawane za kryptograficznie slabe (faktoryzacja w zasięgu współczesnych "
-                f"zasobów obliczeniowych) i powinny zostać zrotowane do >=2048 bit."
+                f"DKIM public key {query}: estimated ~{approx_bits}-bit RSA",
+                f"Estimated from the decoded key length ({n} bytes) - "
+                f"approximate value, does not parse the full ASN.1 structure. Keys <=1024 bit "
+                f"are considered cryptographically weak (factoring is within reach of modern "
+                f"computing resources) and should be rotated to >=2048 bit."
             )
         except Exception:
             pass
@@ -1731,11 +1735,11 @@ def analyze_asn(report):
         info = cymru_asn_lookup(ip, resolver)
         if info and info.get("asn"):
             report.asn_data[ip] = info
-            org = info.get("org") or "nieznana organizacja"
-            country = f", kraj: {info['country']}" if info.get("country") else ""
+            org = info.get("org") or "unknown organization"
+            country = f", country: {info['country']}" if info.get("country") else ""
             report.add("DNS", "INFO", f"{ip}: AS{info['asn']} - {org}{country}",
-                        "Dane pomocne przy mapowaniu infrastruktury / OSINT (dostawca hostingu, "
-                        "operator sieci właściciela adresu IP).")
+                        "Data useful for infrastructure mapping / OSINT (hosting provider, "
+                        "network operator that owns the IP address).")
 
 
 # ---------------------------------------------------------------------------
@@ -1810,20 +1814,20 @@ def analyze_spf_deep(msg, report):
     report.spf_mechanisms = mechanisms
 
     if lookups_used >= 10:
-        report.add("SPF", "HIGH", f"SPF domeny {domain} osiąga/przekracza limit 10 zapytań DNS (RFC 7208)",
-                    "Po przekroczeniu limitu weryfikatory zwracają PermError i traktują SPF jako "
-                    "nieprzeszły (fail) niezależnie od faktycznej autoryzacji - realne ryzyko "
-                    "odrzucania/oznaczania jako spam legalnej poczty.")
+        report.add("SPF", "HIGH", f"SPF of domain {domain} reaches/exceeds the 10 DNS lookup limit (RFC 7208)",
+                    "Once the limit is exceeded, verifiers return PermError and treat SPF as "
+                    "failed (fail) regardless of the actual authorization - a real risk of "
+                    "rejecting/marking legitimate mail as spam.")
     elif lookups_used >= 8:
-        report.add("SPF", "MEDIUM", f"SPF domeny {domain} blisko limitu DNS lookups: {lookups_used}/10",
-                    "Niewielki margines - każdy kolejny 'include' może doprowadzić do PermError.")
+        report.add("SPF", "MEDIUM", f"SPF of domain {domain} is close to the DNS lookup limit: {lookups_used}/10",
+                    "Small margin - every additional 'include' may lead to a PermError.")
     else:
-        report.add("SPF", "INFO", f"SPF domeny {domain}: {lookups_used}/10 wykorzystanych zapytań DNS",
-                    "W granicach limitu RFC 7208.")
+        report.add("SPF", "INFO", f"SPF of domain {domain}: {lookups_used}/10 DNS lookups used",
+                    "Within the RFC 7208 limit.")
 
     includes = sorted(set(m["domain"] for m in mechanisms if m["domain"] != domain))
     if includes:
-        report.add("SPF", "INFO", f"SPF authorization map - domeny włączone przez include/redirect ({len(includes)})",
+        report.add("SPF", "INFO", f"SPF authorization map - domains pulled in via include/redirect ({len(includes)})",
                     ", ".join(includes))
 
     for m in mechanisms:
@@ -1834,9 +1838,9 @@ def analyze_spf_deep(msg, report):
             try:
                 net = ipaddress.ip_network(cidr, strict=False)
                 if net.prefixlen <= 20:
-                    report.add("SPF", "MEDIUM", f"SPF autoryzuje bardzo szeroki zakres ip4: {cidr} ({net.num_addresses} adresów)",
-                                f"Pochodzi z rekordu domeny {m['domain']}. Im szerszy zakres, tym większy "
-                                "obszar potencjalnie mogący wysyłać pocztę w imieniu domeny.")
+                    report.add("SPF", "MEDIUM", f"SPF authorizes a very broad ip4 range: {cidr} ({net.num_addresses} addresses)",
+                                f"Comes from the record of domain {m['domain']}. The broader the range, the larger "
+                                "the area that could potentially send mail on behalf of the domain.")
             except ValueError:
                 pass
         elif low.startswith("ip6:"):
@@ -1844,13 +1848,13 @@ def analyze_spf_deep(msg, report):
             try:
                 net = ipaddress.ip_network(cidr, strict=False)
                 if net.prefixlen <= 48:
-                    report.add("SPF", "MEDIUM", f"SPF autoryzuje bardzo szeroki zakres ip6: {cidr}",
-                                f"Pochodzi z rekordu domeny {m['domain']}.")
+                    report.add("SPF", "MEDIUM", f"SPF authorizes a very broad ip6 range: {cidr}",
+                                f"Comes from the record of domain {m['domain']}.")
             except ValueError:
                 pass
         elif low == "all" and m["qualifier"] == "+":
-            report.add("SPF", "CRITICAL", f"Mechanizm '+all' znaleziony w rozwiniętym łańcuchu SPF (domena {m['domain']})",
-                        "Autoryzuje wysyłkę z dowolnego serwera - krytyczny błąd konfiguracji.")
+            report.add("SPF", "CRITICAL", f"'+all' mechanism found in the expanded SPF chain (domain {m['domain']})",
+                        "Authorizes sending from any server - a critical misconfiguration.")
 
 
 # ---------------------------------------------------------------------------
@@ -1876,9 +1880,9 @@ def analyze_hop_consistency(report):
             try:
                 ptr_host = strip_dot(socket.gethostbyaddr(ip)[0])
             except (socket.herror, socket.gaierror, socket.timeout, OSError):
-                report.add("DNS", "INFO", f"Brak wpisu PTR (reverse DNS) dla {ip}",
-                            "Utrudnia weryfikację tożsamości serwera; część dostawców (np. rezydentne "
-                            "łącza) celowo tego nie publikuje.")
+                report.add("DNS", "INFO", f"No PTR record (reverse DNS) for {ip}",
+                            "Makes verifying the server's identity harder; some providers (e.g. residential "
+                            "links) deliberately do not publish it.")
                 continue
 
             try:
@@ -1888,18 +1892,18 @@ def analyze_hop_consistency(report):
                 forward_ips = set()
 
             if ip in forward_ips:
-                report.add("DNS", "GOOD", f"{ip} <-> {ptr_host}: PTR i A spójne (forward-confirmed)",
-                            "Pełna zgodność PTR/A - typowe dla poprawnie skonfigurowanej, "
-                            "legalnej infrastruktury pocztowej.")
+                report.add("DNS", "GOOD", f"{ip} <-> {ptr_host}: PTR and A consistent (forward-confirmed)",
+                            "Full PTR/A consistency - typical of properly configured, "
+                            "legitimate mail infrastructure.")
             elif forward_ips:
-                report.add("DNS", "MEDIUM", f"{ip} -> PTR {ptr_host}, ale A({ptr_host}) nie wskazuje z powrotem na {ip}",
-                            f"A({ptr_host}) = {', '.join(sorted(forward_ips))}. Brak spójności "
-                            "forward-confirmed rDNS bywa charakterystyczny dla nieautoryzowanych "
-                            "relayów/spoofingu, choć zdarza się też przy niedbałej konfiguracji DNS.")
+                report.add("DNS", "MEDIUM", f"{ip} -> PTR {ptr_host}, but A({ptr_host}) does not point back to {ip}",
+                            f"A({ptr_host}) = {', '.join(sorted(forward_ips))}. A lack of forward-confirmed "
+                            "rDNS consistency is often characteristic of unauthorized "
+                            "relays/spoofing, though it also happens with sloppy DNS configuration.")
             else:
-                report.add("DNS", "LOW", f"{ip} -> PTR {ptr_host}, ale brak rekordu A dla {ptr_host}",
-                            "Nazwa z PTR nie rozwiązuje się z powrotem do żadnego adresu - "
-                            "niekompletna konfiguracja DNS po stronie właściciela hosta.")
+                report.add("DNS", "LOW", f"{ip} -> PTR {ptr_host}, but no A record for {ptr_host}",
+                            "The PTR name does not resolve back to any address - "
+                            "incomplete DNS configuration on the host owner's side.")
 
 
 def analyze_asn_grouping(report):
@@ -1916,7 +1920,7 @@ def analyze_asn_grouping(report):
 
     if len(by_asn) > 1:
         lines = [f"AS{asn}: {', '.join(ips)}" for asn, ips in sorted(by_asn.items())]
-        report.add("DNS", "INFO", f"Adresy IP w łańcuchu Received należą do {len(by_asn)} różnych ASN",
+        report.add("DNS", "INFO", f"IP addresses in the Received chain belong to {len(by_asn)} different ASNs",
                     "; ".join(lines))
 
     mx_asns = set()
@@ -1936,10 +1940,10 @@ def analyze_asn_grouping(report):
     if mx_asns:
         origin_asns = set(by_asn.keys())
         if origin_asns and not (origin_asns & mx_asns):
-            report.add("DNS", "LOW", "ASN nadawcy w łańcuchu Received różni się od ASN aktualnych rekordów MX domeny",
+            report.add("DNS", "LOW", "The sender's ASN in the Received chain differs from the ASN of the domain's current MX records",
                         f"Received ASNs: {sorted(origin_asns)}  vs  MX ASNs: {sorted(mx_asns)}. "
-                        "Może to być normalne (migracja dostawcy poczty, zewnętrzny ESP), ale warto "
-                        "zweryfikować czy wysyłająca infrastruktura jest nadal tym samym operatorem.")
+                        "May be normal (mail provider migration, external ESP), but it is worth "
+                        "verifying whether the sending infrastructure is still the same operator.")
 
 
 def analyze_dnssec(msg, report):
@@ -1958,14 +1962,14 @@ def analyze_dnssec(msg, report):
     try:
         resolver.resolve(domain, "DNSKEY")
         report.posture["dnssec"] = "enabled"
-        report.add("DNS", "GOOD", f"Domena {domain} publikuje rekord DNSKEY (DNSSEC prawdopodobnie włączony)",
-                    "Utrudnia atak DNS cache poisoning/spoofing wobec rekordów tej domeny "
-                    "(w tym SPF/DMARC/MX). Nie jest to pełna walidacja łańcucha zaufania.")
+        report.add("DNS", "GOOD", f"Domain {domain} publishes a DNSKEY record (DNSSEC likely enabled)",
+                    "Makes DNS cache poisoning/spoofing attacks against this domain's records harder "
+                    "(including SPF/DMARC/MX). This is not a full chain-of-trust validation.")
     except Exception:
         report.posture["dnssec"] = "not detected"
-        report.add("DNS", "LOW", f"Brak rekordu DNSKEY dla domeny {domain} (DNSSEC prawdopodobnie wyłączony)",
-                    "Bez DNSSEC rekordy domeny (w tym SPF/DMARC) sa teoretycznie podatne na "
-                    "ataki DNS cache poisoning w niezabezpieczonych ścieżkach resolucji.")
+        report.add("DNS", "LOW", f"No DNSKEY record for domain {domain} (DNSSEC likely disabled)",
+                    "Without DNSSEC, the domain's records (including SPF/DMARC) are theoretically vulnerable to "
+                    "DNS cache poisoning attacks on unprotected resolution paths.")
 
 
 def build_recon_hypotheses(report):
@@ -1977,27 +1981,27 @@ def build_recon_hypotheses(report):
 
     if report.providers:
         top = report.providers[0]
-        hyps.append(("HIGH", f"{top['name']} prawdopodobnie obsługuje pocztę dla tej domeny",
-                     f"na podstawie hosta '{top['example_host']}' w łańcuchu Received."))
+        hyps.append(("HIGH", f"{top['name']} likely handles mail for this domain",
+                     f"based on host '{top['example_host']}' in the Received chain."))
 
     if report.asn_data:
         orgs = sorted(set(i.get("org") for i in report.asn_data.values() if i.get("org")))
         if orgs:
-            hyps.append(("MEDIUM", f"Infrastruktura wysyłająca prawdopodobnie hostowana u: {', '.join(orgs[:3])}",
-                         "na podstawie danych ASN adresów IP z łańcucha Received."))
+            hyps.append(("MEDIUM", f"Sending infrastructure likely hosted at: {', '.join(orgs[:3])}",
+                         "based on ASN data of the IP addresses in the Received chain."))
 
     posture = report.posture
     if posture.get("dmarc", "").startswith("p=reject"):
-        hyps.append(("HIGH", "Domena aktywnie egzekwuje ochronę antyspoofingową (DMARC p=reject)",
-                     "utrudnia to spoofing tej domeny w atakach phishingowych/BEC."))
+        hyps.append(("HIGH", "The domain actively enforces anti-spoofing protection (DMARC p=reject)",
+                     "this makes spoofing this domain in phishing/BEC attacks harder."))
     elif posture.get("dmarc") == "missing":
-        hyps.append(("MEDIUM", "Domena może być podatna na spoofing w atakach phishingowych",
-                     "brak jakiejkolwiek polityki DMARC - warto zweryfikować to jako potencjalny wektor testu socjotechnicznego."))
+        hyps.append(("MEDIUM", "The domain may be vulnerable to spoofing in phishing attacks",
+                     "no DMARC policy at all - worth verifying as a potential vector for a social engineering test."))
 
     for host in report.hostnames:
         if INTERNAL_DOMAIN_SUFFIX_RE.search(host) or INFRA_ROLE_HOSTNAME_RE.match(host):
-            hyps.append(("LOW", f"'{host}' może ujawniać fragment wewnętrznej topologii sieci",
-                         "nazwa sugeruje infrastrukture wewnętrzna - do weryfikacji, nie potwierdzone."))
+            hyps.append(("LOW", f"'{host}' may reveal part of the internal network topology",
+                         "the name suggests internal infrastructure - to be verified, not confirmed."))
             break
 
     report.hypotheses = hyps
@@ -2024,18 +2028,18 @@ def render_console(report, msg_meta):
     print(f"{C.CYAN}{rule}{C.RESET}")
     print(f"{C.BOLD}  {title}{C.RESET}")
     print(f"{C.CYAN}{rule}{C.RESET}")
-    print(f"  {C.DIM}Plik  {C.RESET} {msg_meta.get('file')}")
-    print(f"  {C.DIM}Od    {C.RESET} {msg_meta.get('from')}")
-    print(f"  {C.DIM}Temat {C.RESET} {msg_meta.get('subject')}")
-    print(f"  {C.DIM}Data  {C.RESET} {msg_meta.get('date')}")
+    print(f"  {C.DIM}File   {C.RESET} {msg_meta.get('file')}")
+    print(f"  {C.DIM}From   {C.RESET} {msg_meta.get('from')}")
+    print(f"  {C.DIM}Subject{C.RESET} {msg_meta.get('subject')}")
+    print(f"  {C.DIM}Date   {C.RESET} {msg_meta.get('date')}")
 
     if report.infra_hops:
-        print_section("Mapowanie infrastruktury (Received chain)")
+        print_section("Infrastructure mapping (Received chain)")
         for hop in report.infra_hops:
             ip_str = ", ".join(hop["ips"]) if hop["ips"] else "-"
             tag = f" {C.DIM}[internal/loopback]{C.RESET}" if hop["is_loopback_hop"] else ""
             if not hop.get("has_from", True):
-                tag += f" {C.DIM}[brak klauzuli from]{C.RESET}"
+                tag += f" {C.DIM}[no from clause]{C.RESET}"
             delta = hop.get("delta_seconds")
             delta_str = ""
             if delta is not None:
@@ -2044,30 +2048,30 @@ def render_console(report, msg_meta):
                   f"[{hop['protocol'] or '?'}]  IP: {ip_str}{tag}{delta_str}")
             if hop["tls"]:
                 t = hop["tls"]
-                bits = f", {t['bits']} bitów" if t["bits"] else ""
+                bits = f", {t['bits']} bits" if t["bits"] else ""
                 print(f"           {C.CYAN}TLS: {t['version']} / {t['cipher']}{bits}{C.RESET}")
             for sc in hop["scanners"]:
                 port = f" (port {sc['port']})" if sc["port"] else ""
-                print(f"           {C.DIM}Skaner: {sc['name']}{port}{C.RESET}")
+                print(f"           {C.DIM}Scanner: {sc['name']}{port}{C.RESET}")
 
     if report.hostnames:
-        print_section(f"Wykryte hosty / domeny ({len(report.hostnames)})")
+        print_section(f"Detected hosts / domains ({len(report.hostnames)})")
         print("  " + ", ".join(report.hostnames))
 
     if report.providers:
-        print_section("Wykryci dostawcy poczty / ESP")
+        print_section("Detected mail providers / ESPs")
         for p in report.providers:
             print(f"  - {p['name']}  (host: {p['example_host']})")
 
     if report.software:
-        print_section("Wykryte oprogramowanie")
+        print_section("Detected software")
         for s in report.software:
             v = f" v{s['version']}" if s["version"] else ""
-            print(f"  - {s['software']}{v}  (nagłówek: {s['header']})")
+            print(f"  - {s['software']}{v}  (header: {s['header']})")
 
     if report.posture:
         p = report.posture
-        print_section(f"Postawa bezpieczeństwa domeny: {p.get('domain', '')}")
+        print_section(f"Domain security posture: {p.get('domain', '')}")
         rows = [
             ("SPF", p.get("spf")),
             ("DMARC", p.get("dmarc")),
@@ -2082,7 +2086,7 @@ def render_console(report, msg_meta):
             print(f"  {label:<8} {val}")
 
     if report.findings:
-        print_section("Wszystkie ustalenia (findings)")
+        print_section("All findings")
         ordered = sorted(report.findings, key=lambda f: SEV_ORDER.get(f.severity, 9))
         by_cat = {}
         for f in ordered:
@@ -2093,22 +2097,22 @@ def render_console(report, msg_meta):
                 print_finding(f)
 
     if report.hypotheses:
-        print_section("Hipotezy rekonesansu (do weryfikacji)")
+        print_section("Recon hypotheses (NOT facts - require verification)")
         for confidence, title, evidence in report.hypotheses:
             print(f"  {C.MAGENTA}[{confidence:^6}]{C.RESET} {title}")
             print(f"             {C.DIM}{evidence}{C.RESET}")
 
     if any(report.iocs.get(k) for k in report.iocs):
-        print_section("IOC / wskaźniki")
-        labels = {"ipv4": "IPv4", "ipv6": "IPv6", "domains": "Domeny", "emails": "E-mail",
-                  "urls": "URL", "dkim_selectors": "Selektory DKIM", "message_ids": "Message-ID"}
+        print_section("IOCs / indicators (for further use)")
+        labels = {"ipv4": "IPv4", "ipv6": "IPv6", "domains": "Domains", "emails": "E-mail",
+                  "urls": "URL", "dkim_selectors": "DKIM selectors", "message_ids": "Message-ID"}
         for key, label in labels.items():
             vals = report.iocs.get(key) or []
             if vals:
                 print(f"  {label}: {', '.join(vals)}")
 
     # Summary
-    print_section("Podsumowanie")
+    print_section("Summary")
     counts = {}
     for f in report.findings:
         counts[f.severity] = counts.get(f.severity, 0) + 1
@@ -2145,20 +2149,20 @@ def build_json_report(report, msg_meta):
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Analiza bezpieczeństwa nagłówków SMTP (pentest / recon)."
+        description="SMTP header security analysis (pentest / recon)."
     )
-    parser.add_argument("--headers", required=True, help="Plik z nagłówkami/wiadomością (.txt/.eml)")
-    parser.add_argument("--json", help="Zapisz raport również do pliku JSON")
+    parser.add_argument("--headers", required=True, help="File with headers/message (.txt/.eml)")
+    parser.add_argument("--json", help="Also save the report to a JSON file")
     parser.add_argument("--dns", action="store_true",
-                         help="Wykonaj zapytania DNS (SPF/DMARC/MX/BIMI/MTA-STS/TLS-RPT, ASN, "
-                              "siła klucza DKIM) dla domeny nadawcy (wymaga dnspython i dostępu do sieci)")
+                         help="Run live DNS queries (SPF/DMARC/MX/BIMI/MTA-STS/TLS-RPT, ASN, "
+                              "DKIM key strength) for the sender domain (requires dnspython and network access)")
     parser.add_argument("--deep", action="store_true",
-                         help="Rozszerza --dns o pełną weryfikację konfiguracji: rekurencyjne "
-                              "rozwinięcie SPF (include/redirect + limit 10 lookupów), spójność "
-                              "PTR<->A dla każdego publicznego hopa, grupowanie ASN, DNSSEC oraz "
-                              "podsumowanie postawy bezpieczeństwa domeny i hipotezy rekonesansu. "
-                              "Implikuje --dns. Więcej zapytań DNS = wolniejsze wykonanie.")
-    parser.add_argument("--no-color", action="store_true", help="Wyłącz kolorowanie output")
+                         help="Extends --dns with a full configuration check: recursive "
+                              "SPF expansion (include/redirect + 10-lookup limit), PTR<->A consistency "
+                              "for every public hop, ASN grouping, DNSSEC, plus "
+                              "a domain security posture summary and recon hypotheses. "
+                              "Implies --dns. More DNS queries = slower execution.")
+    parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = parser.parse_args()
 
     if args.deep:
@@ -2171,7 +2175,7 @@ def main():
         with open(args.headers, "rb") as fh:
             raw = fh.read()
     except OSError as e:
-        print(f"Błąd odczytu pliku {args.headers}: {e}", file=sys.stderr)
+        print(f"Error reading file {args.headers}: {e}", file=sys.stderr)
         sys.exit(1)
 
     parse_bytes, was_repaired = repair_unfolded_headers(raw)
@@ -2188,7 +2192,7 @@ def main():
     report.meta = msg_meta
 
     if was_repaired:
-        pass  # naglowki naprawione po cichu - nie wnosi to nic do analizy bezpieczenstwa
+        pass  # headers repaired silently - this adds nothing to the security analysis
 
     analyze_infrastructure(msg, report)
     analyze_software(msg, report)
@@ -2224,7 +2228,7 @@ def main():
         data = build_json_report(report, msg_meta)
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"{C.GREEN}Raport JSON zapisany do: {args.json}{C.RESET}")
+        print(f"{C.GREEN}JSON report saved to: {args.json}{C.RESET}")
 
 
 if __name__ == "__main__":
